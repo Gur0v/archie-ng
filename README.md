@@ -1,135 +1,66 @@
-# Archie: Fast & Easy Package Management for Arch Linux
+# Archie-ng
 
-## Overview
+Even faster & easier package management for Arch Linux.
 
-**﻿⚠️ Warning: This project is no longer actively maintained due to conflicts among the original maintainers. We strongly recommend users transition to [Archium](https://github.com/keirancc/archium), a fork that is actively maintained and offers a more comprehensive feature set, developed by Keiran.**
+## What it does
 
-## Features
+- Update system packages
+- Install/remove packages  
+- Search repositories
+- Clean cache and orphans
+- Works with paru, yay, or pacman
 
-- **System Updates**: Quickly update your entire system
-- **Package Management**: 
-  - Install packages
-  - Remove packages
-  - Purge packages
-- **System Maintenance**:
-  - Clean package cache
-  - Remove orphaned packages
-- **Package Search**: Easily find packages in repositories
+## Install
 
-## Installation
-
-### Method 1: Manual Installation
-
-1. Clone the repository:
-   ```sh
-   git clone https://github.com/TuxForge/archie.git
-   cd archie
-   ```
-
-2. Compile the program:
-   ```sh
-   make
-   ```
-
-3. Install the binary (requires root permissions):
-   ```sh
-   sudo make install
-   ```
-
-### Method 2: AUR Installation
-
-Archie is available on the Arch User Repository (AUR). Install using your preferred AUR helper:
-
-```sh
-yay -S archie
-# Or
-paru -S archie
+```bash
+git clone https://github.com/Gur0v/archie-ng.git
+cd archie-ng
+make
+sudo make install
 ```
 
-## Usage
+## Use
 
-### Interactive Mode
-
-When you run `archie`, you'll see an interactive prompt:
+Run `archie` for interactive mode:
 
 ```
-Welcome to Archie, type "h" for help
-$
+archie> u    # update system
+archie> i    # install package
+archie> s    # search packages
+archie> q    # quit
 ```
 
-#### Available Commands
-
-| Command | Action |
-|---------|--------|
-| `u` | Update the system |
-| `i` | Install a package |
-| `r` | Remove a package |
-| `p` | Purge a package |
-| `c` | Clean cache |
-| `o` | Clean orphaned packages |
-| `s` | Search for a package |
-| `h` | Display help |
-| `q` | Quit the application |
-
-### Command-Line Arguments
-
-#### Execute Specific Commands
-
-Run Archie with a specific command using `--exec`:
-
-```sh
-archie --exec <command>
+Or run commands directly:
+```bash
+archie --exec u
 ```
 
-Supported commands: `u`, `i`, `r`, `p`, `c`, `o`, `s`, `h`
+## Commands
 
-Example:
-```sh
-archie --exec u  # Updates the system directly
-```
+- `u` - Update system
+- `i` - Install package
+- `r` - Remove package  
+- `p` - Purge package + deps
+- `s` - Search packages
+- `c` - Clean cache
+- `o` - Remove orphans
+- `h` - Help
+- `q` - Quit
 
-#### Version Information
+## Why rewrite?
 
-Display version details:
-```sh
-archie --version
-```
+The original had security issues and messy code. This version:
+- Validates all input
+- Uses safe string handling
+- Cleaner architecture
+- No config files needed
 
-## Dependencies
+## Requirements
 
-- `gcc`: GNU Compiler Collection
-- `yay` or `paru`: AUR helpers
-- `git`: Version control system
-- `readline`: Command-line input library
-- `ncurses`: Text-based user interface library
+- GCC
+- Git (installed automatically if missing)
+- At least one of: paru, yay, pacman
 
-## Important Notes
+---
 
-### AUR Helper Selection
-
-- Archie uses `yay` by default
-- If only `paru` is installed, it will use `paru`
-- To force `paru` when both are available, create a file:
-  ```sh
-  touch $HOME/.archie-use-paru
-  ```
-
-### Upgrade Troubleshooting
-
-If you encounter issues upgrading Archie, try:
-```sh
-yay -Scc --noconfirm && yay -S archie --noconfirm
-```
-
-## License
-
-Archie is licensed under the GNU General Public License. See the [LICENSE](LICENSE) file for complete details.
-
-## Credits
-
-- Created & maintained by Gurov
-- Contributors: scklss, Keiran
-
-## Support
-
-For issues, feature requests, or contributions, please visit the [GitHub repository](https://github.com/TuxForge/archie).
+Made by Gurov. GPL-3.0 license.
