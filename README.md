@@ -110,4 +110,4 @@ GPL-3.0 License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-*Archie-ng: Because package management should be fast, safe, and simple.*
+*Disclaimer: Archie-ng **is not affiliated** with Arch Linux or its official package managers.*
