@@ -1,4 +1,4 @@
-CFLAGS = -Wall -Wextra -O2
+CFLAGS = -Wall -Wextra -O2 -march=x86-64 -mtune=generic
 TARGET = archie
 SRC = archie.c
 INSTALL_DIR = /usr/bin
