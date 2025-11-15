@@ -1,5 +1,7 @@
 # Archie-ng
 
+> **⚠️ ARCHIVED**: This project has been archived and superseded by [Archium](https://github.com/keircn/archium).
+
 Even faster & easier package management for Arch Linux.
 
 ## What it does
@@ -17,6 +19,7 @@ Archie-ng is a modern, secure wrapper around Arch Linux package managers that pr
 ## Installation
 
 ### Prerequisites
+
 - A C compiler (GCC, Clang, etc.)
 - Make
 - Readline library (`readline` package)
@@ -24,6 +27,7 @@ Archie-ng is a modern, secure wrapper around Arch Linux package managers that pr
 - At least one package manager: paru, yay, or pacman
 
 ### Quick Install
+
 ```bash
 git clone --depth=1 https://github.com/Gur0v/archie-ng
 cd archie-ng
@@ -33,11 +37,11 @@ sudo make clean install
 ## Usage
 
 ### Interactive Mode
+
 Simply run `archie-ng` to enter interactive mode:
 
 ```
 $ archie-ng
-
 Welcome to Archie-ng v2.1.0
 Using paru package manager
 Type 'h' for help
@@ -49,6 +53,7 @@ $ q    # Quit
 ```
 
 ### Command Line Arguments
+
 ```bash
 archie-ng --version    # Show version
 archie-ng --help       # Show help
@@ -56,17 +61,17 @@ archie-ng --help       # Show help
 
 ## Commands Reference
 
-| Command | Action | Description |
-|---------|--------|-------------|
-| `u` | Update | Update all system packages |
-| `i` | Install | Install a package (with tab completion) |
-| `r` | Remove | Remove a package |
-| `p` | Purge | Remove package and its dependencies |
-| `s` | Search | Search for packages in repositories |
-| `c` | Clean | Clean package cache |
-| `o` | Orphans | Remove orphaned packages |
-| `h` | Help | Show available commands |
-| `q` | Quit | Exit the program |
+| Command | Action   | Description                         |
+|---------|----------|-------------------------------------|
+| `u`     | Update   | Update all system packages          |
+| `i`     | Install  | Install a package (with tab completion) |
+| `r`     | Remove   | Remove a package                    |
+| `p`     | Purge    | Remove package and its dependencies |
+| `s`     | Search   | Search for packages in repositories |
+| `c`     | Clean    | Clean package cache                 |
+| `o`     | Orphans  | Remove orphaned packages            |
+| `h`     | Help     | Show available commands             |
+| `q`     | Quit     | Exit the program                    |
 
 ## Why the Rewrite?
 
@@ -110,4 +115,4 @@ GPL-3.0 License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-*Disclaimer: Archie-ng **is not affiliated** with Arch Linux or its official package managers.*
+*Disclaimer: Archie-ng is not affiliated with Arch Linux or its official package managers.*
