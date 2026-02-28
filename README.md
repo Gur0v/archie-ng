@@ -2,15 +2,12 @@
 
 > Even faster & easier package management for Arch Linux.
 
-A minimal interactive wrapper for `paru`, rewritten in Rust.
+A minimal interactive wrapper for `paru`. An active rewrite of TuxForge/archie in Rust.
 
 ## Features
 
 - Single-letter commands for common operations
-- No external crates — Rust stdlib only
-- No shell injection — explicit `Command::new()` args throughout
-- ~4x faster startup than the previous C version (0.8ms vs 3.4ms)
-- 420KB static binary
+- No external dependencies
 
 ## Installation
 
@@ -36,7 +33,7 @@ sudo cp target/release/archie /usr/local/bin/
 ```
 $ archie
 
-Welcome to Archie v3.0.0
+Welcome to Archie v3.x.x
 Using paru package manager
 Type 'h' for help
 
@@ -195,7 +192,7 @@ This relies entirely on shell expansion of `$HOME`. If the shell isn't bash or `
 
 ### Summary
 
-| Issue | C v1.3 | Rust v3.0 |
+| Issue | C v1.3 | Rust v3.0+ |
 |---|---|---|
 | Shell injection | possible | prevented |
 | Memory leaks | present | eliminated |
