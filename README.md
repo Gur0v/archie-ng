@@ -201,7 +201,6 @@ This relies entirely on shell expansion of `$HOME`. If the shell isn't bash or `
 | Unbounded `scanf` | present | eliminated |
 | Global mutable state | present | eliminated |
 | Startup time | ~3.4ms | ~0.8ms |
-| Binary size | ~50KB | ~420KB |
 | Build | `make` + readline dep | `cargo build` |
 
 </details>
