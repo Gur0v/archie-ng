@@ -1,13 +1,13 @@
 use std::io::{self, Write};
 use std::process::Command;
 
-const VERSION: &str = "3.0.0";
+const VERSION: &str = "3.0.2";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     
     if args.len() == 2 && args[1] == "--version" {
-        println!("Archie v{}", VERSION);
+        display_version();
         return;
     }
     
@@ -39,6 +39,28 @@ fn main() {
         }
     }
     println!();
+}
+
+fn display_version() {
+    println!("    __     ");
+    println!(" .:--.'.   Archie-ng v{} - Fast & Easy package management for Arch Linux", VERSION);
+    println!("/ |   \\ |  Written in Rust, powered by paru.");
+    println!("`\" __ | |  {}", get_paru_version());
+    println!(" .'.''| |  ");
+    println!("/ /   | |_ This program may be freely redistributed under the terms of the GNU General Public License.");
+    println!("\\ \\._,\\ '/ Created & maintained by Gurov");
+    println!(" `--'  `\"  ");
+}
+
+fn get_paru_version() -> String {
+    if let Ok(output) = Command::new("paru").arg("--version").output() {
+        if let Ok(line) = String::from_utf8(output.stdout) {
+            if let Some(version) = line.lines().next() {
+                return version.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
+            }
+        }
+    }
+    String::from("unknown")
 }
 
 fn exec(args: &[&str]) {
