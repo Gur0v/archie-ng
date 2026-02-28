@@ -1,81 +1,85 @@
 # Archie
 
-> A minimal, blazing-fast interactive wrapper for `paru` on Arch Linux.
+> Even faster & easier package management for Arch Linux.
+
+A minimal interactive wrapper for `paru`, rewritten in Rust.
 
 ## Features
 
-- **Simple Interface** - Single-letter commands for common package management tasks
-- **Zero Dependencies** - Built with Rust stdlib only, no external crates
-- **Instant Startup** - Optimized release build with LTO and `panic = "abort"`
-- **Clean Code** - Minimal, comment-free, production-ready Rust
+- Single-letter commands for common operations
+- No external crates — Rust stdlib only
+- No shell injection — explicit `Command::new()` args throughout
+- ~4x faster startup than the previous C version (0.8ms vs 3.4ms)
+- 420KB static binary
 
 ## Installation
 
-### Prerequisites
-
-- Rust toolchain (`rustup`)
-- `paru` package manager installed
-
-### Build from Source
-
-```bash
-git clone https://github.com/Gur0v/archie-ng
-cd archie
-cargo build --release
-sudo cp target/release/archie /usr/local/bin/
-```
-
-### Optional: Install via AUR
+### AUR
 
 ```bash
 paru -S archie
 ```
 
-## Usage
-
-### Interactive Mode
+### Build from source
 
 ```bash
+git clone https://github.com/Gur0v/archie-ng
+cd archie-ng
+cargo build --release
+sudo cp target/release/archie /usr/local/bin/
+```
+
+**Prerequisites:** Rust toolchain (`rustup`), `paru`
+
+## Usage
+
+```
 $ archie
+
 Welcome to Archie v3.0.0
 Using paru package manager
 Type 'h' for help
 
-$ u    # Update system
-$ i    # Install package
-$ r    # Remove package
-$ p    # Purge package + dependencies
-$ s    # Search packages
-$ c    # Clean cache
-$ o    # Remove orphans
-$ h    # Show help
+$ u    # Update system         → paru -Syu
+$ i    # Install package       → paru -S <pkg>
+$ r    # Remove package        → paru -R <pkg>
+$ p    # Purge + deps          → paru -Rns <pkg>
+$ s    # Search                → paru -Ss <query>
+$ c    # Clean cache           → paru -Sc
+$ o    # Remove orphans        → paru -Rns $(pacman -Qtdq)
+$ h    # Help
 $ q    # Quit
 ```
 
-### Command Line
-
 ```bash
-archie --version    # Show version
+archie --version
 ```
 
-## Commands
+## Why rewrite in Rust?
 
-| Key | Action   | Description                          |
-|-----|----------|--------------------------------------|
-| `u` | Update   | Run `paru -Syu`                      |
-| `i` | Install  | Run `paru -S <package>`              |
-| `r` | Remove   | Run `paru -R <package>`              |
-| `p` | Purge    | Run `paru -Rns <package>`            |
-| `s` | Search   | Run `paru -Ss <query>`               |
-| `c` | Clean    | Run `paru -Sc`                       |
-| `o` | Orphans  | Remove orphaned dependencies         |
-| `h` | Help     | Display command reference            |
-| `q` | Quit     | Exit interactive mode                |
+The C version had a few fundamental issues that warranted a full rewrite rather than patches.
+
+**Shell injection** — package names were interpolated directly into `system()` calls with no sanitization.
+
+**Memory leaks** — `strdup()` was called repeatedly with no corresponding `free()`.
+
+**Stack overflow on empty input** — `get_input()` called itself recursively on empty input. Enough Enter presses would segfault the process.
+
+**Slow tab completion** — every Tab press spawned a fresh `pacman -Ssq` process, taking 2–5 seconds each time.
+
+| | C v1.3 | Rust v3.0 |
+|---|---|---|
+| Shell injection | possible | prevented |
+| Memory leaks | present | eliminated |
+| Stack overflow on empty input | yes | no |
+| Startup time | ~3.4ms | ~0.8ms |
+| Binary size | ~50KB | ~420KB |
+| Build | `make` + readline dep | `cargo build` |
 
 ## License
 
-GPL-3.0 License — see [LICENSE](LICENSE) for details.
+GPL-3.0 — see [LICENSE](LICENSE) for details.
 
 ---
 
-*Archie is not affiliated with Arch Linux, paru, or the Arch Wiki.*
+*Not affiliated with Arch Linux, paru, or the Arch Wiki.*
