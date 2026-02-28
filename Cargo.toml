@@ -1,13 +1,17 @@
 [package]
 name = "archie"
-version = "3.1.0"
-edition = "2021"
+version = "3.1.1"
+edition = "2024"
+authors = ["Gurov"]
+description = "Fast & Easy package management for Arch Linux"
+license = "GPL-3.0"
 
 [dependencies]
-rustyline = "14"
+rustyline = "17"
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
+strip = true
