@@ -4,6 +4,23 @@
 
 A minimal interactive wrapper for `paru`. An active rewrite of TuxForge/archie in Rust.
 
+<details>
+<summary><strong>Why rewrite in Rust?</strong></summary>
+
+The C version worked, but had critical issues:
+
+| Issue | C v1.3 | Rust v3.2+ |
+|-------|--------|------------|
+| Shell injection via `system()` | ✅ Possible | ❌ Prevented |
+| Memory leaks (`strdup` w/o `free`) | ✅ Present | ❌ Eliminated |
+| Buffer/stack overflows | ✅ Possible | ❌ Eliminated |
+| Blocking tab completion (~3s) | ✅ Yes | ❌ Instant |
+| Build complexity | `make` + readline | `cargo build` |
+
+**Bottom line:** Same UX, zero footguns. The rewrite is about safety, not features.
+
+</details>
+
 ## Features
 
 - Single-letter commands for common operations
@@ -94,128 +111,6 @@ paru -Pc
 ```
 
 Official repo packages are loaded automatically via `pacman -Slq`.
-
-## Why rewrite in Rust?
-
-### Memory leaks
-
-`strdup()` is called in `get_package_manager_version()`, `command_generator()`, and `get_pacman_commands()` with no corresponding `free()`. Every tab completion, every version check, every package list fetch leaks memory.
-
-```c
-char* get_package_manager_version(const char *package_manager) {
-    return strdup(version_start); // never freed
-}
-commands[command_count - 1] = strdup(path); // array never freed
-```
-
-**Rust fix:** Ownership model. If it compiles, it doesn't leak.
-
----
-
-### Shell injection
-
-Every operation builds a command string and passes it to `system()`. No input validation.
-
-```c
-snprintf(command, sizeof(command), "%s -S %s", package_manager, package);
-system(command); // package = "foo; rm -rf ~" works fine
-```
-
-**Rust fix:** `Command::new()` with explicit arg arrays. No shell, no injection.
-
----
-
-### Buffer overflow in `get_input()`
-
-```c
-#define MAX_INPUT_LENGTH 256
-strcpy(input, line); // line can be longer than 256 bytes → stack corruption
-```
-
-**Rust fix:** `String` grows dynamically. No fixed buffers, no overflows.
-
----
-
-### Stack overflow on empty input
-
-```c
-void get_input(...) {
-    if (strlen(input) == 0) {
-        get_input(input, prompt); // recurse forever on Enter spam
-    }
-}
-```
-
-**Rust fix:** Loops, not recursion. Stack stays happy.
-
----
-
-### Unbounded `scanf`
-
-```c
-char response[10];
-scanf("%s", response); // input >9 chars → buffer overflow
-```
-
-**Rust fix:** `readline()` returns a `String`. No width limits needed.
-
----
-
-### Global mutable state in completion
-
-```c
-static char **commands = NULL; // fetched once, leaked forever, never refreshed
-```
-
-**Rust fix:** Packages loaded once at startup, owned by the completer, dropped on exit. Refresh by restarting (or add a `refresh` command later).
-
----
-
-### Tab completion blocks 2–5 seconds
-
-`pacman -Ssq` runs synchronously on first Tab. Terminal freezes.
-
-**Rust fix:** Load packages at startup (~100ms). Completion is instant thereafter.
-
----
-
-### Wasteful `system()` calls for binary checks
-
-```c
-system("command -v yay > /dev/null 2>&1"); // forks a shell just to check PATH
-```
-
-**Rust fix:** We assume `paru` is installed (it's a dependency). No runtime checks needed.
-
----
-
-### Fragile shell compound commands
-
-```c
-system("mkdir -p $HOME/... && cd ... && git clone ... && makepkg ...");
-// Fails silently if $HOME has spaces, or any step fails midway
-```
-
-**Rust fix:** Not applicable — `archie` doesn't install package managers. Let the user manage their setup.
-
----
-
-### Summary
-
-| Issue | C v1.3 | Rust v3.1+ |
-|-------|--------|------------|
-| Shell injection | ✅ Possible | ❌ Prevented |
-| Memory leaks | ✅ Present | ❌ Eliminated |
-| Buffer overflow | ✅ Possible | ❌ Eliminated |
-| Stack overflow | ✅ Possible | ❌ Eliminated |
-| Unbounded `scanf` | ✅ Present | ❌ Eliminated |
-| Global mutable state | ✅ Present | ❌ Eliminated |
-| Completion latency | ~3000ms | ~0ms (after load) |
-| Startup time | ~3.4ms | ~0.8ms |
-| Build | `make` + readline | `cargo build` |
-| Binary size | ~50KB | ~3.5MB (static, worth it) |
-
-The rewrite isn't about features. It's about sleeping at night knowing your package wrapper won't segfault, leak, or get pwned by a cleverly named package.
 
 ## License
 
