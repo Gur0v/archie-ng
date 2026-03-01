@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, exit};
 use rustyline::completion::Completer;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -11,8 +11,15 @@ use rustyline::{Context, Helper, Editor, history::DefaultHistory};
 const VERSION: &str = "3.1.1";
 
 fn main() {
-    if std::env::args().nth(1).as_deref() == Some("--version") {
+    let args: Vec<String> = std::env::args().collect();
+    
+    if args.get(1).map(String::as_str) == Some("--version") {
         display_version();
+        return;
+    }
+    
+    if args.get(1).map(String::as_str) == Some("-e") || args.get(1).map(String::as_str) == Some("--exec") {
+        handle_exec(&args[2..]);
         return;
     }
 
@@ -45,6 +52,49 @@ fn main() {
         }
     }
     println!();
+}
+
+fn handle_exec(args: &[String]) {
+    let Some(cmd) = args.first() else {
+        eprintln!("Error: -e requires a command (u|i|r|p|c|o|s|h)");
+        exit(1);
+    };
+
+    let extra = &args[1..];
+    
+    match cmd.as_str() {
+        "u" => paru(&["-Syu"]),
+        "i" => exec_with_prompt("Package: ", |p| paru(&["-S", p]), extra),
+        "r" => exec_with_prompt("Package: ", |p| paru(&["-R", p]), extra),
+        "p" => exec_with_prompt("Package: ", |p| paru(&["-Rns", p]), extra),
+        "c" => paru(&["-Sc"]),
+        "o" => shell("paru -Rns $(pacman -Qtdq)"),
+        "s" => exec_with_prompt("Search: ", |q| paru(&["-Ss", q]), extra),
+        "h" => println!("Commands: u - Update, i - Install, r - Remove, p - Purge, s - Search, c - Clean cache, o - Remove orphans, h - Help, q - Quit"),
+        _ => {
+            eprintln!("Invalid command for -e: {cmd}");
+            eprintln!("Valid commands: u|i|r|p|c|o|s|h");
+            exit(1);
+        }
+    }
+}
+
+fn exec_with_prompt<F>(label: &str, action: F, extra: &[String])
+where
+    F: Fn(&str),
+{
+    if let Some(arg) = extra.first() {
+        action(arg);
+    } else {
+        let mut rl: Editor<PackageCompleter, DefaultHistory> = Editor::new().expect("Failed to create editor");
+        rl.set_helper(Some(PackageCompleter { packages: load_packages() }));
+        if let Ok(input) = rl.readline(label) {
+            let val = input.trim();
+            if !val.is_empty() {
+                action(val);
+            }
+        }
+    }
 }
 
 fn display_version() {
