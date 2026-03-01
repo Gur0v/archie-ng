@@ -1,6 +1,8 @@
-use std::fs;
-use std::path::PathBuf;
-use std::process::{Command, exit};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio, exit};
+use std::sync::OnceLock;
 use rustyline::completion::Completer;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -8,9 +10,17 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Helper, Editor, history::DefaultHistory};
 
-const VERSION: &str = "3.2.1";
+const VERSION: &str = "3.3.0";
+
+static PARU_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+fn paru_path() -> &'static Path {
+    PARU_PATH.get_or_init(|| PathBuf::from("paru"))
+}
 
 fn main() {
+    let _ = PARU_PATH.set(PathBuf::from("paru"));
+    
     let args: Vec<String> = std::env::args().collect();
     
     if args.get(1).map(String::as_str) == Some("--version") {
@@ -26,7 +36,8 @@ fn main() {
     let mut rl: Editor<PackageCompleter, DefaultHistory> = Editor::new().expect("Failed to create editor");
     rl.set_helper(Some(PackageCompleter { packages: load_packages() }));
 
-    println!("\nWelcome to Archie v{VERSION}\nType 'h' for help\n");
+    println!("\nWelcome to Archie v{VERSION}");
+    println!("Type 'h' for help\n");
 
     loop {
         let input = match rl.readline("$ ") {
@@ -45,7 +56,14 @@ fn main() {
             "s" => prompt(&mut rl, "Search: ",  |p| paru(&["-Ss", p])),
             "c" => paru(&["-Sc"]),
             "o" => shell("paru -Rns $(pacman -Qtdq)"),
-            "h" => println!("\nCommands:\n  u - Update system      i - Install package\n  r - Remove package     p - Purge package\n  s - Search packages    c - Clean cache\n  o - Remove orphans     h - Show help\n  q - Quit\n"),
+            "h" => {
+                println!("\nCommands:");
+                println!("  u - Update system      i - Install package");
+                println!("  r - Remove package     p - Purge package");
+                println!("  s - Search packages    c - Clean cache");
+                println!("  o - Remove orphans     h - Show help");
+                println!("  q - Quit\n");
+            }
             "q" => break,
             "" => continue,
             _ => println!("Unknown command. Type 'h' for help"),
@@ -54,6 +72,7 @@ fn main() {
     println!();
 }
 
+#[inline]
 fn handle_exec(args: &[String]) {
     let Some(cmd) = args.first() else {
         eprintln!("Error: -e requires a command (u|i|r|p|c|o|s|h)");
@@ -79,6 +98,7 @@ fn handle_exec(args: &[String]) {
     }
 }
 
+#[inline]
 fn exec_with_prompt<F>(label: &str, action: F, extra: &[String])
 where
     F: Fn(&str),
@@ -98,7 +118,9 @@ where
 }
 
 fn display_version() {
-    let paru = Command::new("paru").arg("--version").output()
+    let paru_ver = Command::new("paru")
+        .arg("--version")
+        .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|s| s.lines().next().map(|l| {
@@ -110,7 +132,7 @@ fn display_version() {
     println!("    __     ");
     println!(" .:--.'.   Archie-ng v{VERSION} - Fast & Easy package management for Arch Linux");
     println!("/ |   \\ |  Written in Rust, powered by paru.");
-    println!("`\" __ | |  {paru}");
+    println!("`\" __ | |  {paru_ver}");
     println!(" .'.''| |  ");
     println!("/ /   | |_ This program may be freely redistributed under the terms of the GNU General Public License.");
     println!("\\ \\._,\\ '/ Created & maintained by Gurov");
@@ -118,15 +140,26 @@ fn display_version() {
 }
 
 fn load_packages() -> Vec<String> {
-    let mut packages: Vec<String> = Command::new("pacman").arg("-Slq").output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.lines().filter(|l| !l.is_empty()).map(String::from).collect())
-        .unwrap_or_default();
+    let mut packages = Vec::with_capacity(120_000);
+    
+    if let Ok(output) = Command::new("pacman").arg("-Slq").output() {
+        if let Ok(content) = String::from_utf8(output.stdout) {
+            for line in content.lines() {
+                if !line.is_empty() {
+                    packages.push(line.to_string());
+                }
+            }
+        }
+    }
 
     let aur_cache = PathBuf::from(env!("HOME")).join(".cache/paru/packages.aur");
-    if let Ok(content) = fs::read_to_string(aur_cache) {
-        packages.extend(content.lines().filter(|l| !l.is_empty()).map(String::from));
+    if let Ok(file) = File::open(aur_cache) {
+        let reader = BufReader::new(file);
+        for line in reader.lines().flatten() {
+            if !line.is_empty() {
+                packages.push(line);
+            }
+        }
     }
 
     packages.sort();
@@ -134,12 +167,25 @@ fn load_packages() -> Vec<String> {
     packages
 }
 
+#[inline]
 fn paru(args: &[&str]) {
-    let _ = Command::new("paru").args(args).status();
+    let _ = Command::new(paru_path())
+        .args(args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status();
 }
 
+#[inline]
 fn shell(cmd: &str) {
-    let _ = Command::new("sh").arg("-c").arg(cmd).status();
+    let _ = Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status();
 }
 
 fn prompt(rl: &mut Editor<PackageCompleter, DefaultHistory>, label: &str, action: impl Fn(&str)) {
@@ -165,6 +211,15 @@ impl Completer for PackageCompleter {
     type Candidate = String;
 
     fn complete(&self, line: &str, _pos: usize, _ctx: &Context<'_>) -> Result<(usize, Vec<String>), ReadlineError> {
-        Ok((0, self.packages.iter().filter(|p| p.starts_with(line)).cloned().collect()))
+        let start = self.packages.binary_search_by(|p| p.as_str().cmp(line)).unwrap_or_else(|i| i);
+        let mut matches = Vec::with_capacity(64);
+        for pkg in &self.packages[start..] {
+            if pkg.starts_with(line) {
+                matches.push(pkg.clone());
+            } else {
+                break;
+            }
+        }
+        Ok((0, matches))
     }
 }
