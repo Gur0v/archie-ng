@@ -8,7 +8,7 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Helper, Editor, history::DefaultHistory};
 
-const VERSION: &str = "3.1.1";
+const VERSION: &str = "3.2.0";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
