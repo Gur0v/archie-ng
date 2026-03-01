@@ -8,7 +8,7 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Helper, Editor, history::DefaultHistory};
 
-const VERSION: &str = "3.2.0";
+const VERSION: &str = "3.2.1";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -101,8 +101,11 @@ fn display_version() {
     let paru = Command::new("paru").arg("--version").output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.lines().next().map(|l| l.split_whitespace().skip(1).collect::<Vec<_>>().join(" ")))
-        .unwrap_or_else(|| "unknown".into());
+        .and_then(|s| s.lines().next().map(|l| {
+            let mut parts = l.split_whitespace().skip(1);
+            parts.next().map(|v| format!("paru {}", v)).unwrap_or_else(|| "paru unknown".into())
+        }))
+        .unwrap_or_else(|| "paru unknown".into());
 
     println!("    __     ");
     println!(" .:--.'.   Archie-ng v{VERSION} - Fast & Easy package management for Arch Linux");
