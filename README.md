@@ -86,12 +86,12 @@ Type a key. Done. Tab completion handles package names automatically.
 For scripts or aliases, skip the interactive UI:
 
 ```bash
-archie -e u
-archie -e i firefox
-archie -e i        # prompts with completion
-archie -e s
-archie -e o
-archie --exec h
+archie -e update
+archie -e install firefox
+archie -e install        # prompts with completion
+archie -e search
+archie -e orphans
+archie --exec help
 ```
 
 **Exit codes**
