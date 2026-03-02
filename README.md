@@ -8,8 +8,6 @@ This is a ground-up rewrite of the original TuxForge/archie in Rust, focused on 
 
 It does one job. It does it fast.
 
----
-
 ## Why the rewrite?
 
 The old C version worked, but it had sharp edges. The kind you only notice at 2am when something breaks.
@@ -24,8 +22,6 @@ The old C version worked, but it had sharp edges. The kind you only notice at 2a
 
 In short: fewer footguns, better behavior, less babysitting.
 
----
-
 ## Features
 
 * Single-letter commands for common tasks
@@ -36,8 +32,6 @@ In short: fewer footguns, better behavior, less babysitting.
 * Fast startup, memory-safe, no shell surprises
 
 Nothing fancy. Just quick.
-
----
 
 ## Installation
 
@@ -60,8 +54,6 @@ sudo install -Dm755 target/release/archie /usr/local/bin/archie
 
 * Rust toolchain (`rustup`)
 * `paru`
-
----
 
 ## Usage
 
@@ -89,8 +81,6 @@ Archie v3.5.0-rc1 — type h for help
 
 Type a key. Done. Tab completion handles package names automatically.
 
----
-
 ### Exec mode (scripting)
 
 For scripts or aliases, skip the interactive UI:
@@ -109,15 +99,11 @@ archie --exec h
 * `0` success
 * `1` invalid command
 
----
-
 ### Version
 
 ```bash
 archie --version
 ```
-
----
 
 ## Configuration
 
@@ -147,8 +133,6 @@ quit    = { key = "q", action = "builtin:quit",                       desc = "ex
 help    = { key = "h", action = "builtin:help",                       desc = "show this help" }
 ```
 
----
-
 ### Fields
 
 | Field     | Required | Meaning                                  |
@@ -158,8 +142,6 @@ help    = { key = "h", action = "builtin:help",                       desc = "sh
 | `desc`    | no       | help text                                |
 | `prompt`  | no       | asks for input and fills `{placeholder}` |
 | `confirm` | no       | y/N confirmation                         |
-
----
 
 ### Action types
 
@@ -171,8 +153,6 @@ help    = { key = "h", action = "builtin:help",                       desc = "sh
 | `builtin:help` | show help           |
 
 Use `shell:` only when you need pipes or redirects.
-
----
 
 ### Custom commands
 
@@ -187,8 +167,6 @@ notes  = { key = "n", action = "shell:bat ~/.local/share/archie/notes.log",     
 
 If it runs in your shell, Archie can run it.
 
----
-
 ## Tab completion
 
 Works out of the box.
@@ -201,12 +179,8 @@ paru -Pc
 
 Official packages are read automatically from `pacman`.
 
----
-
 ## License
 
 GPL-3.0. See `LICENSE` for details.
-
----
 
 *Archie is not affiliated with Arch Linux or paru.*
