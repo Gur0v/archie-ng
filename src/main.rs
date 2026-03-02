@@ -1,6 +1,7 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+use std::fs;
+use std::io::{self, Write};
+use std::path::PathBuf;
 use std::process::{Command, Stdio, exit};
 use std::sync::OnceLock;
 use rustyline::completion::Completer;
@@ -9,22 +10,80 @@ use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Helper, Editor, history::DefaultHistory};
+use serde::Deserialize;
 
-const VERSION: &str = "3.4.0";
+const VERSION: &str = "3.5.0-rc1";
 
 static PARU_PATH: OnceLock<PathBuf> = OnceLock::new();
 
-fn paru_path() -> &'static Path {
+fn paru_path() -> &'static std::path::Path {
     PARU_PATH.get_or_init(|| PathBuf::from("paru"))
 }
 
 fn cyan(s: &str) -> String { format!("\x1b[36m{s}\x1b[0m") }
 fn bold(s: &str) -> String { format!("\x1b[1m{s}\x1b[0m") }
 fn dim(s: &str)  -> String { format!("\x1b[2m{s}\x1b[0m") }
+fn red(s: &str)  -> String { format!("\x1b[31m{s}\x1b[0m") }
+
+#[derive(Deserialize, Clone)]
+struct CommandEntry {
+    key: String,
+    action: String,
+    prompt: Option<String>,
+    desc: Option<String>,
+    confirm: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct Config {
+    commands: HashMap<String, CommandEntry>,
+}
+
+fn default_config_toml() -> &'static str {
+    r#"[commands]
+update  = { key = "u", action = "paru -Syu",                          desc = "upgrade all packages" }
+install = { key = "i", action = "paru -S {pkg}",                      desc = "install a package",        prompt = "pkg" }
+remove  = { key = "r", action = "paru -R {pkg}",                      desc = "remove a package",         prompt = "pkg" }
+purge   = { key = "p", action = "paru -Rns {pkg}",                    desc = "remove package + deps",    prompt = "pkg",    confirm = true }
+search  = { key = "s", action = "paru -Ss {query}",                   desc = "search packages",          prompt = "query" }
+clean   = { key = "c", action = "paru -Sc",                           desc = "clean package cache" }
+orphans = { key = "o", action = "shell:paru -Rns $(pacman -Qtdq)",    desc = "remove orphaned packages", confirm = true }
+log     = { key = "l", action = "shell:tail -n 50 /var/log/pacman.log | less", desc = "view recent pacman log" }
+quit    = { key = "q", action = "builtin:quit",                       desc = "exit archie" }
+help    = { key = "h", action = "builtin:help",                       desc = "show this help" }
+"#
+}
+
+fn config_path() -> PathBuf {
+    let mut p = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()));
+    p.push(".config/archie/archie.toml");
+    p
+}
+
+fn load_config() -> Config {
+    let path = config_path();
+    if let Ok(content) = fs::read_to_string(&path) {
+        match toml::from_str(&content) {
+            Ok(cfg) => return cfg,
+            Err(e) => {
+                eprintln!("{}", red(&format!("config error: {e}")));
+                exit(1);
+            }
+        }
+    }
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(&path, default_config_toml());
+    toml::from_str(default_config_toml()).expect("default config is valid")
+}
+
+fn build_key_map(cfg: &Config) -> HashMap<String, CommandEntry> {
+    cfg.commands.values().map(|e| (e.key.clone(), e.clone())).collect()
+}
 
 fn main() {
     let _ = PARU_PATH.set(PathBuf::from("paru"));
-
     let args: Vec<String> = std::env::args().collect();
 
     if args.get(1).map(String::as_str) == Some("--version") {
@@ -32,8 +91,11 @@ fn main() {
         return;
     }
 
+    let cfg = load_config();
+    let keymap = build_key_map(&cfg);
+
     if args.get(1).map(String::as_str) == Some("-e") || args.get(1).map(String::as_str) == Some("--exec") {
-        handle_exec(&args[2..]);
+        handle_exec(&args[2..], &cfg);
         return;
     }
 
@@ -49,90 +111,133 @@ fn main() {
             Err(e) => { eprintln!("Error: {e:?}"); break; }
         };
 
-        rl.add_history_entry(&input).expect("Failed to add history");
+        let key = input.trim();
+        if key.is_empty() { continue; }
 
-        match input.trim() {
-            "u" => { println!("{}", dim("→ updating system...")); paru(&["-Syu"]); }
-            "i" => prompt(&mut rl, &format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ installing {p}..."))); paru(&["-S", p]); }),
-            "r" => prompt(&mut rl, &format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ removing {p}..."))); paru(&["-R", p]); }),
-            "p" => prompt(&mut rl, &format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ purging {p}..."))); paru(&["-Rns", p]); }),
-            "s" => prompt(&mut rl, &format!("{} ", cyan("search ❯")), |p| { println!("{}", dim(&format!("→ searching {p}..."))); paru(&["-Ss", p]); }),
-            "c" => { println!("{}", dim("→ cleaning cache...")); paru(&["-Sc"]); }
-            "o" => { println!("{}", dim("→ removing orphans...")); shell("paru -Rns $(pacman -Qtdq)"); }
-            "h" => print_help(),
-            "q" => break,
-            ""  => continue,
-            _   => println!("{}", dim("unknown command — type 'h' for help")),
+        rl.add_history_entry(key).expect("Failed to add history");
+
+        if let Some(entry) = keymap.get(key) {
+            run_entry(entry, None, &mut rl, &keymap);
+        } else {
+            println!("{}", dim("unknown command — type 'h' for help"));
         }
     }
     println!();
 }
 
-fn help_row(key: &str, cmd: &str, desc: &str) {
-    println!("  {}   {}   {}",
-        bold(&cyan(&format!("{key:<3}"))),
-        bold(&format!("{cmd:<7}")),
-        dim(desc),
-    );
+fn run_entry(entry: &CommandEntry, arg: Option<&str>, rl: &mut Editor<PackageCompleter, DefaultHistory>, keymap: &HashMap<String, CommandEntry>) {
+    match entry.action.as_str() {
+        "builtin:quit" => {
+            println!();
+            exit(0);
+        }
+        "builtin:help" => {
+            print_help_from_entry_map(keymap);
+        }
+        _ => {
+            let val = if let Some(placeholder) = &entry.prompt {
+                if let Some(a) = arg {
+                    a.to_string()
+                } else {
+                    let label = format!("{} ", cyan(&format!("{placeholder} ❯")));
+                    match rl.readline(&label) {
+                        Ok(input) => {
+                            let trimmed = input.trim().to_string();
+                            if trimmed.is_empty() { return; }
+                            rl.add_history_entry(&trimmed).ok();
+                            trimmed
+                        }
+                        Err(_) => return,
+                    }
+                }
+            } else {
+                String::new()
+            };
+
+            if entry.confirm.unwrap_or(false) {
+                if !ask_confirm(&val) { return; }
+            }
+
+            let action = if entry.prompt.is_some() {
+                let placeholder = entry.prompt.as_deref().unwrap_or("");
+                entry.action.replace(&format!("{{{placeholder}}}"), &val)
+            } else {
+                entry.action.clone()
+            };
+
+            let desc = entry.desc.as_deref().unwrap_or(&action);
+            println!("{}", dim(&format!("→ {desc}...")));
+
+            dispatch(&action);
+        }
+    }
 }
 
-fn print_help() {
-    println!();
-    println!("  {}   {}   {}", bold(&cyan(&format!("{:<3}", "key"))), bold(&format!("{:<7}", "command")), dim("description"));
-    println!("  {}", dim("─────────────────────────────────────────"));
-    help_row("u", "update",  "upgrade all packages");
-    help_row("i", "install", "install a package");
-    help_row("r", "remove",  "remove a package");
-    help_row("p", "purge",   "remove package with deps");
-    help_row("s", "search",  "search packages");
-    help_row("c", "clean",   "clean package cache");
-    help_row("o", "orphans", "remove orphaned packages");
-    help_row("q", "quit",    "exit archie");
-    println!();
+fn ask_confirm(context: &str) -> bool {
+    let label = if context.is_empty() {
+        format!("{} ", bold(&red("confirm? [y/N]")))
+    } else {
+        format!("{} ", bold(&red(&format!("confirm '{context}'? [y/N]"))))
+    };
+    print!("{label}");
+    let _ = io::stdout().flush();
+    let mut buf = String::new();
+    io::stdin().read_line(&mut buf).ok();
+    matches!(buf.trim().to_lowercase().as_str(), "y" | "yes")
 }
 
-#[inline]
-fn handle_exec(args: &[String]) {
-    let Some(cmd) = args.first() else {
-        eprintln!("{}", dim("error: -e requires a command (u|i|r|p|c|o|s|h)"));
+fn dispatch(action: &str) {
+    if let Some(cmd) = action.strip_prefix("shell:") {
+        shell(cmd);
+    } else {
+        let parts: Vec<&str> = action.split_whitespace().collect();
+        if parts.is_empty() { return; }
+        if parts[0] == "paru" {
+            paru(&parts[1..]);
+        } else {
+            let _ = Command::new(parts[0])
+                .args(&parts[1..])
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .status();
+        }
+    }
+}
+
+fn handle_exec(args: &[String], cfg: &Config) {
+    let Some(name) = args.first() else {
+        eprintln!("{}", dim("error: -e requires a command name"));
         exit(1);
     };
 
-    let extra = &args[1..];
+    let entry = cfg.commands.get(name.as_str()).unwrap_or_else(|| {
+        eprintln!("{}", red(&format!("error: unknown command '{name}'")));
+        exit(1);
+    });
 
-    match cmd.as_str() {
-        "u" => { println!("{}", dim("→ updating system...")); paru(&["-Syu"]); }
-        "i" => exec_with_prompt(&format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ installing {p}..."))); paru(&["-S", p]); }, extra),
-        "r" => exec_with_prompt(&format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ removing {p}..."))); paru(&["-R", p]); }, extra),
-        "p" => exec_with_prompt(&format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ purging {p}..."))); paru(&["-Rns", p]); }, extra),
-        "c" => { println!("{}", dim("→ cleaning cache...")); paru(&["-Sc"]); }
-        "o" => { println!("{}", dim("→ removing orphans...")); shell("paru -Rns $(pacman -Qtdq)"); }
-        "s" => exec_with_prompt(&format!("{} ", cyan("search ❯")), |q| { println!("{}", dim(&format!("→ searching {q}..."))); paru(&["-Ss", q]); }, extra),
-        "h" => print_help(),
-        _ => {
-            eprintln!("{}", dim(&format!("error: invalid command '{cmd}' — valid: u|i|r|p|c|o|s|h")));
-            exit(1);
-        }
-    }
+    let arg = args.get(1).map(String::as_str);
+
+    let mut rl: Editor<PackageCompleter, DefaultHistory> = Editor::new().expect("Failed to create editor");
+    rl.set_helper(Some(PackageCompleter { packages: load_packages() }));
+
+    let keymap = build_key_map(cfg);
+    run_entry(entry, arg, &mut rl, &keymap);
 }
 
-#[inline]
-fn exec_with_prompt<F>(label: &str, action: F, extra: &[String])
-where
-    F: Fn(&str),
-{
-    if let Some(arg) = extra.first() {
-        action(arg);
-    } else {
-        let mut rl: Editor<PackageCompleter, DefaultHistory> = Editor::new().expect("Failed to create editor");
-        rl.set_helper(Some(PackageCompleter { packages: load_packages() }));
-        if let Ok(input) = rl.readline(label) {
-            let val = input.trim();
-            if !val.is_empty() {
-                action(val);
-            }
-        }
+fn print_help_from_entry_map(keymap: &HashMap<String, CommandEntry>) {
+    let mut entries: Vec<&CommandEntry> = keymap.values().collect();
+    entries.sort_by(|a, b| a.key.cmp(&b.key));
+
+    println!();
+    println!("  {}   {}", bold(&cyan(&format!("{:<4}", "key"))), dim("description"));
+    println!("  {}", dim("──────────────────────────────────"));
+
+    for e in entries {
+        let desc = e.desc.as_deref().unwrap_or(&e.action);
+        println!("  {}   {}", bold(&cyan(&format!("{:<4}", e.key))), dim(desc));
     }
+    println!();
 }
 
 fn display_version() {
@@ -170,9 +275,11 @@ fn load_packages() -> Vec<String> {
         }
     }
 
-    let aur_cache = PathBuf::from(env!("HOME")).join(".cache/paru/packages.aur");
-    if let Ok(file) = File::open(aur_cache) {
-        let reader = BufReader::new(file);
+    let aur_cache = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+        .join(".cache/paru/packages.aur");
+    if let Ok(file) = std::fs::File::open(aur_cache) {
+        use std::io::BufRead;
+        let reader = std::io::BufReader::new(file);
         for line in reader.lines().flatten() {
             if !line.is_empty() {
                 packages.push(line);
@@ -185,7 +292,6 @@ fn load_packages() -> Vec<String> {
     packages
 }
 
-#[inline]
 fn paru(args: &[&str]) {
     let _ = Command::new(paru_path())
         .args(args)
@@ -195,7 +301,6 @@ fn paru(args: &[&str]) {
         .status();
 }
 
-#[inline]
 fn shell(cmd: &str) {
     let _ = Command::new("sh")
         .arg("-c")
@@ -204,16 +309,6 @@ fn shell(cmd: &str) {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status();
-}
-
-fn prompt(rl: &mut Editor<PackageCompleter, DefaultHistory>, label: &str, action: impl Fn(&str)) {
-    if let Ok(input) = rl.readline(label) {
-        rl.add_history_entry(&input).expect("Failed to add history");
-        let trimmed = input.trim();
-        if !trimmed.is_empty() {
-            action(trimmed);
-        }
-    }
 }
 
 struct PackageCompleter {

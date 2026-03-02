@@ -1,6 +1,6 @@
 [package]
 name = "archie"
-version = "3.4.0"
+version = "3.5.0-rc1"
 edition = "2024"
 authors = ["Gurov"]
 description = "Fast & Easy package management for Arch Linux"
@@ -8,6 +8,8 @@ license = "GPL-3.0"
 
 [dependencies]
 rustyline = "17"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
 
 [profile.release]
 opt-level = 3
