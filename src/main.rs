@@ -10,7 +10,7 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Helper, Editor, history::DefaultHistory};
 
-const VERSION: &str = "3.3.0";
+const VERSION: &str = "3.4.0";
 
 static PARU_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -18,16 +18,20 @@ fn paru_path() -> &'static Path {
     PARU_PATH.get_or_init(|| PathBuf::from("paru"))
 }
 
+fn cyan(s: &str) -> String { format!("\x1b[36m{s}\x1b[0m") }
+fn bold(s: &str) -> String { format!("\x1b[1m{s}\x1b[0m") }
+fn dim(s: &str)  -> String { format!("\x1b[2m{s}\x1b[0m") }
+
 fn main() {
     let _ = PARU_PATH.set(PathBuf::from("paru"));
-    
+
     let args: Vec<String> = std::env::args().collect();
-    
+
     if args.get(1).map(String::as_str) == Some("--version") {
         display_version();
         return;
     }
-    
+
     if args.get(1).map(String::as_str) == Some("-e") || args.get(1).map(String::as_str) == Some("--exec") {
         handle_exec(&args[2..]);
         return;
@@ -36,11 +40,10 @@ fn main() {
     let mut rl: Editor<PackageCompleter, DefaultHistory> = Editor::new().expect("Failed to create editor");
     rl.set_helper(Some(PackageCompleter { packages: load_packages() }));
 
-    println!("\nWelcome to Archie v{VERSION}");
-    println!("Type 'h' for help\n");
+    println!("\n{} {}", bold(&cyan("Archie")), dim(&format!("v{VERSION} — type {} for help", bold("h"))));
 
     loop {
-        let input = match rl.readline("$ ") {
+        let input = match rl.readline(&format!("{} ", cyan("❯"))) {
             Ok(line) => line,
             Err(ReadlineError::Interrupted | ReadlineError::Eof) => break,
             Err(e) => { eprintln!("Error: {e:?}"); break; }
@@ -49,50 +52,65 @@ fn main() {
         rl.add_history_entry(&input).expect("Failed to add history");
 
         match input.trim() {
-            "u" => paru(&["-Syu"]),
-            "i" => prompt(&mut rl, "Package: ", |p| paru(&["-S", p])),
-            "r" => prompt(&mut rl, "Package: ", |p| paru(&["-R", p])),
-            "p" => prompt(&mut rl, "Package: ", |p| paru(&["-Rns", p])),
-            "s" => prompt(&mut rl, "Search: ",  |p| paru(&["-Ss", p])),
-            "c" => paru(&["-Sc"]),
-            "o" => shell("paru -Rns $(pacman -Qtdq)"),
-            "h" => {
-                println!("\nCommands:");
-                println!("  u - Update system      i - Install package");
-                println!("  r - Remove package     p - Purge package");
-                println!("  s - Search packages    c - Clean cache");
-                println!("  o - Remove orphans     h - Show help");
-                println!("  q - Quit\n");
-            }
+            "u" => { println!("{}", dim("→ updating system...")); paru(&["-Syu"]); }
+            "i" => prompt(&mut rl, &format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ installing {p}..."))); paru(&["-S", p]); }),
+            "r" => prompt(&mut rl, &format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ removing {p}..."))); paru(&["-R", p]); }),
+            "p" => prompt(&mut rl, &format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ purging {p}..."))); paru(&["-Rns", p]); }),
+            "s" => prompt(&mut rl, &format!("{} ", cyan("search ❯")), |p| { println!("{}", dim(&format!("→ searching {p}..."))); paru(&["-Ss", p]); }),
+            "c" => { println!("{}", dim("→ cleaning cache...")); paru(&["-Sc"]); }
+            "o" => { println!("{}", dim("→ removing orphans...")); shell("paru -Rns $(pacman -Qtdq)"); }
+            "h" => print_help(),
             "q" => break,
-            "" => continue,
-            _ => println!("Unknown command. Type 'h' for help"),
+            ""  => continue,
+            _   => println!("{}", dim("unknown command — type 'h' for help")),
         }
     }
+    println!();
+}
+
+fn help_row(key: &str, cmd: &str, desc: &str) {
+    println!("  {}   {}   {}",
+        bold(&cyan(&format!("{key:<3}"))),
+        bold(&format!("{cmd:<7}")),
+        dim(desc),
+    );
+}
+
+fn print_help() {
+    println!();
+    println!("  {}   {}   {}", bold(&cyan(&format!("{:<3}", "key"))), bold(&format!("{:<7}", "command")), dim("description"));
+    println!("  {}", dim("─────────────────────────────────────────"));
+    help_row("u", "update",  "upgrade all packages");
+    help_row("i", "install", "install a package");
+    help_row("r", "remove",  "remove a package");
+    help_row("p", "purge",   "remove package with deps");
+    help_row("s", "search",  "search packages");
+    help_row("c", "clean",   "clean package cache");
+    help_row("o", "orphans", "remove orphaned packages");
+    help_row("q", "quit",    "exit archie");
     println!();
 }
 
 #[inline]
 fn handle_exec(args: &[String]) {
     let Some(cmd) = args.first() else {
-        eprintln!("Error: -e requires a command (u|i|r|p|c|o|s|h)");
+        eprintln!("{}", dim("error: -e requires a command (u|i|r|p|c|o|s|h)"));
         exit(1);
     };
 
     let extra = &args[1..];
-    
+
     match cmd.as_str() {
-        "u" => paru(&["-Syu"]),
-        "i" => exec_with_prompt("Package: ", |p| paru(&["-S", p]), extra),
-        "r" => exec_with_prompt("Package: ", |p| paru(&["-R", p]), extra),
-        "p" => exec_with_prompt("Package: ", |p| paru(&["-Rns", p]), extra),
-        "c" => paru(&["-Sc"]),
-        "o" => shell("paru -Rns $(pacman -Qtdq)"),
-        "s" => exec_with_prompt("Search: ", |q| paru(&["-Ss", q]), extra),
-        "h" => println!("Commands: u - Update, i - Install, r - Remove, p - Purge, s - Search, c - Clean cache, o - Remove orphans, h - Help, q - Quit"),
+        "u" => { println!("{}", dim("→ updating system...")); paru(&["-Syu"]); }
+        "i" => exec_with_prompt(&format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ installing {p}..."))); paru(&["-S", p]); }, extra),
+        "r" => exec_with_prompt(&format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ removing {p}..."))); paru(&["-R", p]); }, extra),
+        "p" => exec_with_prompt(&format!("{} ", cyan("pkg ❯")), |p| { println!("{}", dim(&format!("→ purging {p}..."))); paru(&["-Rns", p]); }, extra),
+        "c" => { println!("{}", dim("→ cleaning cache...")); paru(&["-Sc"]); }
+        "o" => { println!("{}", dim("→ removing orphans...")); shell("paru -Rns $(pacman -Qtdq)"); }
+        "s" => exec_with_prompt(&format!("{} ", cyan("search ❯")), |q| { println!("{}", dim(&format!("→ searching {q}..."))); paru(&["-Ss", q]); }, extra),
+        "h" => print_help(),
         _ => {
-            eprintln!("Invalid command for -e: {cmd}");
-            eprintln!("Valid commands: u|i|r|p|c|o|s|h");
+            eprintln!("{}", dim(&format!("error: invalid command '{cmd}' — valid: u|i|r|p|c|o|s|h")));
             exit(1);
         }
     }
@@ -130,18 +148,18 @@ fn display_version() {
         .unwrap_or_else(|| "paru unknown".into());
 
     println!("    __     ");
-    println!(" .:--.'.   Archie-ng v{VERSION} - Fast & Easy package management for Arch Linux");
-    println!("/ |   \\ |  Written in Rust, powered by paru.");
-    println!("`\" __ | |  {paru_ver}");
+    println!(" .:--.'.   {} {}", bold(&cyan("Archie-ng")), bold(&format!("v{VERSION}")));
+    println!("/ |   \\ |  {}", dim("Fast & easy package management for Arch Linux"));
+    println!("`\" __ | |  {}", dim(&paru_ver));
     println!(" .'.''| |  ");
-    println!("/ /   | |_ This program may be freely redistributed under the terms of the GNU General Public License.");
-    println!("\\ \\._,\\ '/ Created & maintained by Gurov");
+    println!("/ /   | |_ {}", dim("This program may be freely redistributed under the terms of the GNU General Public License."));
+    println!("\\ \\._,\\ '/ {}", dim("Created & maintained by Gurov"));
     println!(" `--'  `\"  ");
 }
 
 fn load_packages() -> Vec<String> {
     let mut packages = Vec::with_capacity(120_000);
-    
+
     if let Ok(output) = Command::new("pacman").arg("-Slq").output() {
         if let Ok(content) = String::from_utf8(output.stdout) {
             for line in content.lines() {
