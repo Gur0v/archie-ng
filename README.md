@@ -9,7 +9,7 @@ A minimal interactive wrapper for `paru`. An active rewrite of TuxForge/archie i
 
 The C version worked, but had critical issues:
 
-| Issue | C v1.3 | Rust v3.2+ |
+| Issue | C v1.3 | Rust v3.4+ |
 |-------|--------|------------|
 | Shell injection via `system()` | ✅ Possible | ❌ Prevented |
 | Memory leaks (`strdup` w/o `free`) | ✅ Present | ❌ Eliminated |
@@ -43,7 +43,7 @@ paru -S archie
 git clone https://github.com/Gur0v/archie-ng
 cd archie-ng
 cargo build --release
-sudo cp target/release/archie /usr/local/bin/
+sudo install -Dm755 target/release/archie /usr/local/bin/archie
 ```
 
 **Prerequisites:** Rust toolchain (`rustup`), `paru`
@@ -53,20 +53,21 @@ sudo cp target/release/archie /usr/local/bin/
 ### Interactive mode
 
 ```
-$ archie
+❯ archie
 
-Welcome to Archie v3.1.1
-Type 'h' for help
+Archie v3.4.0 — type h for help
+❯ h
 
-$ u    # Update system         → paru -Syu
-$ i    # Install package       → paru -S <pkg>
-$ r    # Remove package        → paru -R <pkg>
-$ p    # Purge + deps          → paru -Rns <pkg>
-$ s    # Search                → paru -Ss <query>
-$ c    # Clean cache           → paru -Sc
-$ o    # Remove orphans        → paru -Rns $(pacman -Qtdq)
-$ h    # Help
-$ q    # Quit
+  key   command   description
+  ─────────────────────────────────────────
+  u     update    upgrade all packages
+  i     install   install a package
+  r     remove    remove a package
+  p     purge     remove package with deps
+  s     search    search packages
+  c     clean     clean package cache
+  o     orphans   remove orphaned packages
+  q     quit      exit archie
 ```
 
 Tab completion works automatically when entering package names.
@@ -92,9 +93,9 @@ archie --version
 
 ```
     __     
- .:--.'.   Archie-ng v3.2.0 - Fast & Easy package management for Arch Linux
-/ |   \ |  Written in Rust, powered by paru.
-`" __ | |  paru v2.1.0.r67.g9ac3578 +git - libalpm v16.0.1
+ .:--.'.   Archie-ng v3.4.0
+/ |   \ |  Fast & easy package management for Arch Linux
+`" __ | |  paru v2.1.0.r67.g9ac3578
  .'.''| |  
 / /   | |_ This program may be freely redistributed under the terms of the GNU General Public License.
 \ \._,\ '/ Created & maintained by Gurov
@@ -106,7 +107,6 @@ archie --version
 Completion works out of the box. To keep AUR packages up to date:
 
 ```bash
-# Generate/update the AUR package cache (run occasionally)
 paru -Pc
 ```
 
