@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio, exit};
 use std::sync::OnceLock;
 use rustyline::completion::Completer;
@@ -11,8 +11,9 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Helper, Editor, history::DefaultHistory};
 use serde::Deserialize;
+use dirs::{config_dir, cache_dir};
 
-const VERSION: &str = "3.5.0-rc1";
+const VERSION: &str = "3.5.0-rc2";
 
 static PARU_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -24,6 +25,7 @@ fn cyan(s: &str) -> String { format!("\x1b[36m{s}\x1b[0m") }
 fn bold(s: &str) -> String { format!("\x1b[1m{s}\x1b[0m") }
 fn dim(s: &str)  -> String { format!("\x1b[2m{s}\x1b[0m") }
 fn red(s: &str)  -> String { format!("\x1b[31m{s}\x1b[0m") }
+fn yellow(s: &str) -> String { format!("\x1b[33m{s}\x1b[0m") }
 
 #[derive(Deserialize, Clone)]
 struct CommandEntry {
@@ -55,27 +57,88 @@ help    = { key = "h", action = "builtin:help",                       desc = "sh
 }
 
 fn config_path() -> PathBuf {
-    let mut p = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()));
-    p.push(".config/archie/archie.toml");
+    let mut p = config_dir()
+        .unwrap_or_else(|| PathBuf::from("."));
+    p.push("archie");
+    p.push("archie.toml");
     p
+}
+
+fn validate_entry(_key: &str, entry: &CommandEntry) -> Result<(), String> {
+    if entry.key.is_empty() {
+        return Err("key is empty".into());
+    }
+    if entry.action.is_empty() {
+        return Err("action is empty".into());
+    }
+    if let Some(prompt) = &entry.prompt {
+        if !entry.action.contains(&format!("{{{prompt}}}")) {
+            return Err(format!("action missing placeholder {{{prompt}}}"));
+        }
+    }
+    Ok(())
+}
+
+fn write_config_atomically(path: &Path, content: &str) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let temp_path = path.with_extension("toml.tmp");
+    fs::write(&temp_path, content)?;
+    fs::rename(&temp_path, path)?;
+    Ok(())
 }
 
 fn load_config() -> Config {
     let path = config_path();
+    let mut final_commands = toml::from_str::<Config>(default_config_toml())
+        .expect("default config is valid")
+        .commands;
+
+    let mut user_key_map: HashMap<String, String> = HashMap::new();
+
     if let Ok(content) = fs::read_to_string(&path) {
-        match toml::from_str(&content) {
-            Ok(cfg) => return cfg,
+        match toml::from_str::<Config>(&content) {
+            Ok(user_cfg) => {
+                for (name, entry) in user_cfg.commands {
+                    match validate_entry(&name, &entry) {
+                        Ok(_) => {
+                            if let Some(existing_name) = user_key_map.get(&entry.key) {
+                                eprintln!("{}", red(&format!("Error: Duplicate command key '{}' in '{}' (already defined in '{}')", entry.key, name, existing_name)));
+                                exit(1);
+                            }
+                            user_key_map.insert(entry.key.clone(), name.clone());
+                            final_commands.insert(name, entry);
+                        }
+                        Err(e) => {
+                            eprintln!("{}", yellow(&format!("Warning: Skipping invalid command '{name}': {e}")));
+                        }
+                    }
+                }
+            }
             Err(e) => {
-                eprintln!("{}", red(&format!("config error: {e}")));
+                eprintln!("{}", yellow(&format!("Config parse error at '{}': {e}", path.display())));
+                eprintln!("{}", dim("Falling back to default configuration."));
+            }
+        }
+    } else {
+        if let Err(e) = write_config_atomically(&path, default_config_toml()) {
+            eprintln!("{}", yellow(&format!("Warning: Could not write default config: {e}")));
+        }
+    }
+
+    let mut final_key_map: HashMap<String, String> = HashMap::new();
+    for (name, entry) in &final_commands {
+        if let Some(existing_name) = final_key_map.get(&entry.key) {
+            if existing_name != name {
+                eprintln!("{}", red(&format!("Error: Duplicate command key '{}' in '{}' (already defined in '{}')", entry.key, name, existing_name)));
                 exit(1);
             }
         }
+        final_key_map.insert(entry.key.clone(), name.clone());
     }
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(&path, default_config_toml());
-    toml::from_str(default_config_toml()).expect("default config is valid")
+
+    Config { commands: final_commands }
 }
 
 fn build_key_map(cfg: &Config) -> HashMap<String, CommandEntry> {
@@ -231,7 +294,14 @@ fn print_help_from_entry_map(keymap: &HashMap<String, CommandEntry>) {
 
     println!();
     println!("  {}   {}", bold(&cyan(&format!("{:<4}", "key"))), dim("description"));
-    println!("  {}", dim("──────────────────────────────────"));
+
+    let max_len = entries.iter()
+        .map(|e| e.desc.as_deref().unwrap_or(&e.action).len())
+        .max()
+        .unwrap_or(0);
+    
+    let width = (9 + max_len).clamp(34, 64);
+    println!("  {}", dim(&"─".repeat(width)));
 
     for e in entries {
         let desc = e.desc.as_deref().unwrap_or(&e.action);
@@ -275,8 +345,10 @@ fn load_packages() -> Vec<String> {
         }
     }
 
-    let aur_cache = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
-        .join(".cache/paru/packages.aur");
+    let aur_cache = cache_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("paru")
+        .join("packages.aur");
     if let Ok(file) = std::fs::File::open(aur_cache) {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(file);
