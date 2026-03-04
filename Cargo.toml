@@ -1,20 +1,20 @@
 [package]
 name = "archie"
-version = "3.5.0-rc2"
+version = "3.5.0"
 edition = "2021"
 authors = ["Gurov"]
 description = "Fast & Easy package management for Arch Linux"
 license = "GPL-3.0"
 
 [dependencies]
-rustyline = "17"
-serde = { version = "1", features = ["derive"] }
-toml = "1"
-dirs = "6"
+rustyline = { version = "17", default-features = false, features = ["derive"] }
+serde     = { version = "1",  features = ["derive"] }
+toml      = { version = "1",  default-features = false, features = ["parse", "serde"] }
+dirs      = "6"
 
 [profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
+opt-level       = 3
+lto             = "fat"
+codegen-units   = 1
+panic           = "abort"
+strip           = "symbols"
