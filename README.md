@@ -1,40 +1,48 @@
 # Archie
+
 > Even faster & easier package management for Arch Linux.
 
-A ground-up Rust rewrite of [TuxForge/archie](https://github.com/TuxForge/archie). Single-letter commands, instant tab completion, no runtime surprises.
+A ground-up Rust rewrite of [TuxForge/archie](https://github.com/TuxForge/archie) — single-letter commands, tab completion backed by sorted binary-search indexes, and safe subprocess dispatch with no shell injection surface.
 
 ## Why rewrite?
+
 The original C version worked — until it didn't.
 
-| Issue | C v1.3 | Rust v3.6+ |
+| | C v1.3 | Rust v3.7+ |
 |---|---|---|
 | Shell injection via `system()` | Possible | Prevented |
 | Memory leaks | Present | Gone |
-| Buffer/stack overflows | Possible | Gone |
+| Buffer / stack overflows | Possible | Gone |
 | Tab completion lag | ~3s | Instant |
-| Build setup | make + readline | cargo build |
+| Build setup | make + readline | `cargo build` |
 
 ## Installation
+
 **AUR**
+
 ```bash
 paru -S archie
 ```
 
-**From source**
+**From source** — requires `rustup` and `paru`
+
 ```bash
 git clone https://github.com/Gur0v/archie-ng
 cd archie-ng
 cargo build --release
 sudo install -Dm755 target/release/archie /usr/local/bin/archie
 ```
-Requires `rustup` and `paru`.
 
 ## Usage
-### Interactive
+
+### Interactive mode
+
 ```
-bash-5.3$ archie
-Archie v3.6.0 — type h for help
+$ archie
+
+Archie v3.7.0 — type h for help
 ❯ h
+
   key    description
   ──────────────────────────────────
   c      clean package cache
@@ -49,20 +57,30 @@ Archie v3.6.0 — type h for help
   u      upgrade all packages
 ```
 
-Type a key. Tab completion works on package names automatically. The prompt supports history navigation (`↑`/`↓`), cursor movement (`←`/`→`), `Ctrl+C`/`Ctrl+D` to exit, and `Ctrl+A`/`Ctrl+E` to jump to the start/end of the line.
+Type a key to run a command. At any prompt:
+
+- **Tab** — complete package names
+- **↑ / ↓** — history navigation
+- **← / →** — cursor movement
+- **Ctrl+A / Ctrl+E** — jump to start / end of line
+- **Ctrl+C / Ctrl+D** — exit
 
 ### Exec mode
-For scripts and aliases:
+
+Run any command non-interactively, useful for scripts and shell aliases:
+
 ```bash
-archie -e install firefox   # non-interactive, arg supplied
-archie -e install           # prompts with completion
+archie -e install firefox   # argument supplied directly
+archie -e install           # prompts for input with completion
 archie -e update
 archie -e orphans
 ```
-Exit codes: `0` success, `1` invalid command.
+
+Exit codes: `0` on success, `1` on invalid command.
 
 ## Configuration
-Archie reads `~/.config/archie/archie.toml` on startup, creating it with defaults if absent.
+
+Archie reads `~/.config/archie/archie.toml` on startup, writing the default config if none exists. The file is written atomically via a `.tmp` rename to prevent corruption on interrupted writes.
 
 ```toml
 edition = "2026-1"
@@ -80,44 +98,46 @@ quit    = { key = "q", action = "builtin:quit",                                d
 help    = { key = "h", action = "builtin:help",                                desc = "show this help"            }
 ```
 
-The `edition` field is used to detect config compatibility. If your config's edition differs from the current one, Archie will warn you on startup but continue with your settings.
+The `edition` field signals config compatibility. A mismatch produces a warning at startup but does not prevent Archie from running. Duplicate keys across commands are detected at load time and cause an immediate exit with a descriptive error.
 
-### Fields
+### Command fields
+
 | Field | Required | Description |
 |---|---|---|
 | `key` | yes | Single-character trigger |
-| `action` | yes | Command to run |
-| `desc` | no | Help text |
-| `prompt` | no | Prompts for input, fills `{placeholder}` in action |
-| `confirm` | no | Requires y/N before executing |
+| `action` | yes | Command to execute |
+| `desc` | no | Text shown in the help screen |
+| `prompt` | no | Prompts for input and fills `{placeholder}` in `action` |
+| `confirm` | no | Requires `y/N` confirmation before executing |
 
 ### Action prefixes
+
 | Prefix | Behavior |
 |---|---|
-| *(none)* | Executed directly |
-| `shell:` | Passed to `sh -c` — use for pipes and redirects |
+| *(none)* | Spawned directly via `execv` — no shell, no injection surface |
+| `shell:` | Passed to `sh -c` — supports pipes, redirects, and subshells |
 | `builtin:quit` | Exit Archie |
-| `builtin:help` | Show help |
+| `builtin:help` | Show the help screen |
 
-### Custom commands
+### Adding custom commands
+
 ```toml
 [commands]
-mirror = { key = "m", action = "shell:rate-mirrors --save /etc/pacman.d/mirrorlist arch", desc = "update mirrorlist" }
+mirror = { key = "m", action = "shell:rate-mirrors --save /etc/pacman.d/mirrorlist arch", desc = "update mirrorlist"    }
 diff   = { key = "d", action = "shell:pacdiff",                                           desc = "review pacdiff files" }
 ```
-If it runs in a shell, Archie can run it.
 
 ## Package cache
-Tab completion is backed by two databases in `~/.cache/archie/`:
 
-| File | Source | Used for |
+Tab completion is backed by two sorted, newline-delimited plain-text databases in `~/.cache/archie/`. Prefix lookups use `partition_point` for O(log n) binary search — no fuzzy matching overhead, no startup latency.
+
+| File | Populated by | Used for |
 |---|---|---|
-| `available.db` | `paru -Slq` | install, search prompts |
-| `installed.db` | `paru -Qq` | remove, purge prompts |
+| `available.db` | `paru -Slq` | `install`, `search` prompts |
+| `installed.db` | `paru -Qq` | `remove`, `purge` prompts |
 
-Both are populated on first launch if absent. After any install, remove, or update action they are refreshed in the background, so the next session always has a current list.
+Both files are created on first launch if absent. After any install, remove, or update action they are refreshed in a background thread behind an `Arc<RwLock<_>>`, keeping completion current for the next session without blocking the UI.
 
 ## License
-GPL-3.0 — see [LICENSE](LICENSE).
 
-*Not affiliated with Arch Linux or paru.*
+[GPL-3.0](LICENSE) — not affiliated with Arch Linux or paru.
