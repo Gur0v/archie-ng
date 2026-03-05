@@ -3,7 +3,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio, exit};
-use std::sync::OnceLock;
+use std::sync::{Arc, RwLock};
+use std::thread;
 
 use rustyline::completion::Completer;
 use rustyline::error::ReadlineError;
@@ -14,10 +15,11 @@ use rustyline::{Context, Editor, Helper, history::DefaultHistory};
 use serde::Deserialize;
 use dirs::{cache_dir, config_dir};
 
-const VERSION: &str = "3.5.0";
-const PARU:    &str  = "paru";
+const CONFIG_EDITION: &str = "2026-1";
+const VERSION:        &str = "3.6.0";
+const PARU:           &str = "paru";
 
-// ── ANSI helpers ────────────────────────────────────────────────────────────
+// ── ANSI helpers ─────────────────────────────────────────────────────────────
 
 macro_rules! ansi {
     ($code:literal, $fn:ident) => {
@@ -30,7 +32,7 @@ ansi!("2",  dim);
 ansi!("31", red);
 ansi!("33", yellow);
 
-// ── Config ───────────────────────────────────────────────────────────────────
+// ── Config ────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize, Clone)]
 struct CommandEntry {
@@ -43,11 +45,14 @@ struct CommandEntry {
 
 #[derive(Deserialize)]
 struct Config {
+    edition:  Option<String>,
     commands: HashMap<String, CommandEntry>,
 }
 
 fn default_config_toml() -> &'static str {
-    r#"[commands]
+    r#"edition = "2026-1"
+
+[commands]
 update  = { key = "u", action = "paru -Syu",                                   desc = "upgrade all packages"      }
 install = { key = "i", action = "paru -S {pkg}",                               desc = "install a package",        prompt = "pkg"   }
 remove  = { key = "r", action = "paru -R {pkg}",                               desc = "remove a package",         prompt = "pkg"   }
@@ -95,6 +100,13 @@ fn load_config() -> Config {
     if let Ok(content) = fs::read_to_string(&path) {
         match toml::from_str::<Config>(&content) {
             Ok(user_cfg) => {
+                if user_cfg.edition.as_deref() != Some(CONFIG_EDITION) {
+                    eprintln!("{}", yellow(&format!(
+                        "Warning: config edition '{}' differs from current '{}' — some options may be ignored.",
+                        user_cfg.edition.as_deref().unwrap_or("unset"),
+                        CONFIG_EDITION,
+                    )));
+                }
                 for (name, entry) in user_cfg.commands {
                     match validate_entry(&entry) {
                         Ok(())  => { commands.insert(name, entry); }
@@ -121,24 +133,84 @@ fn load_config() -> Config {
         }
     }
 
-    Config { commands }
+    Config { edition: Some(CONFIG_EDITION.into()), commands }
 }
 
 fn build_key_map(cfg: &Config) -> HashMap<String, CommandEntry> {
     cfg.commands.values().map(|e| (e.key.clone(), e.clone())).collect()
 }
 
-// ── Editor type alias ────────────────────────────────────────────────────────
+// ── Package cache ─────────────────────────────────────────────────────────────
+
+fn archie_cache_dir() -> PathBuf {
+    cache_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("archie")
+}
+
+fn available_db_path() -> PathBuf { archie_cache_dir().join("available.db") }
+fn installed_db_path() -> PathBuf { archie_cache_dir().join("installed.db") }
+
+fn refresh_available() -> Vec<String> {
+    let mut pkgs = Vec::with_capacity(8_192);
+    if let Ok(out) = Command::new(PARU).arg("-Slq").output() {
+        if let Ok(s) = String::from_utf8(out.stdout) {
+            pkgs.extend(s.lines().filter(|l| !l.is_empty()).map(str::to_string));
+        }
+    }
+    pkgs.sort_unstable();
+    pkgs.dedup();
+    let path = available_db_path();
+    let _ = fs::create_dir_all(path.parent().unwrap());
+    let _ = fs::write(&path, pkgs.join("\n"));
+    pkgs
+}
+
+fn refresh_installed() -> Vec<String> {
+    let mut pkgs = Vec::new();
+    if let Ok(out) = Command::new(PARU).arg("-Qq").output() {
+        if let Ok(s) = String::from_utf8(out.stdout) {
+            pkgs.extend(s.lines().filter(|l| !l.is_empty()).map(str::to_string));
+        }
+    }
+    pkgs.sort_unstable();
+    pkgs.dedup();
+    let path = installed_db_path();
+    let _ = fs::create_dir_all(path.parent().unwrap());
+    let _ = fs::write(&path, pkgs.join("\n"));
+    pkgs
+}
+
+fn read_db(path: &Path) -> Vec<String> {
+    fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn load_available() -> Vec<String> {
+    let path = available_db_path();
+    if path.exists() { read_db(&path) } else { refresh_available() }
+}
+
+fn load_installed() -> Vec<String> {
+    let path = installed_db_path();
+    if path.exists() { read_db(&path) } else { refresh_installed() }
+}
+
+// ── Editor type alias ─────────────────────────────────────────────────────────
 
 type Rl = Editor<PackageCompleter, DefaultHistory>;
 
-fn make_editor() -> Rl {
+fn make_editor(available: Arc<RwLock<Vec<String>>>, installed: Arc<RwLock<Vec<String>>>) -> Rl {
     let mut rl = Editor::new().expect("failed to create editor");
-    rl.set_helper(Some(PackageCompleter::default()));
+    rl.set_helper(Some(PackageCompleter { available, installed, mode: CompleteMode::Available }));
     rl
 }
 
-// ── Entry point ──────────────────────────────────────────────────────────────
+// ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -151,12 +223,15 @@ fn main() {
     let cfg    = load_config();
     let keymap = build_key_map(&cfg);
 
+    let available = Arc::new(RwLock::new(load_available()));
+    let installed = Arc::new(RwLock::new(load_installed()));
+
     if matches!(args.get(1).map(String::as_str), Some("-e") | Some("--exec")) {
-        handle_exec(&args[2..], &cfg);
+        handle_exec(&args[2..], &cfg, Arc::clone(&available), Arc::clone(&installed));
         return;
     }
 
-    let mut rl = make_editor();
+    let mut rl = make_editor(Arc::clone(&available), Arc::clone(&installed));
     println!("\n{} {}", bold(&cyan("Archie")), dim(&format!("v{VERSION} — type {} for help", bold("h"))));
 
     loop {
@@ -166,7 +241,7 @@ fn main() {
                 if key.is_empty() { continue; }
                 rl.add_history_entry(key).ok();
                 match keymap.get(key) {
-                    Some(entry) => run_entry(entry, None, &mut rl, &keymap),
+                    Some(entry) => run_entry(entry, None, &mut rl, &keymap, Arc::clone(&available), Arc::clone(&installed)),
                     None        => println!("{}", dim("unknown command — type 'h' for help")),
                 }
             }
@@ -177,18 +252,33 @@ fn main() {
     println!();
 }
 
-// ── Command dispatch ─────────────────────────────────────────────────────────
+// ── Command dispatch ──────────────────────────────────────────────────────────
+
+fn is_update_action(action: &str) -> bool {
+    matches!(action, "paru -Syu" | "paru -Sc")
+        || action.starts_with("paru -S ")
+        || action.starts_with("paru -R")
+}
 
 fn run_entry(
-    entry:  &CommandEntry,
-    arg:    Option<&str>,
-    rl:     &mut Rl,
-    keymap: &HashMap<String, CommandEntry>,
+    entry:     &CommandEntry,
+    arg:       Option<&str>,
+    rl:        &mut Rl,
+    keymap:    &HashMap<String, CommandEntry>,
+    available: Arc<RwLock<Vec<String>>>,
+    installed: Arc<RwLock<Vec<String>>>,
 ) {
     match entry.action.as_str() {
         "builtin:quit" => { println!(); exit(0); }
         "builtin:help" => { print_help(keymap); }
         _ => {
+            if let Some(h) = rl.helper_mut() {
+                h.mode = match entry.prompt.as_deref() {
+                    Some("pkg") if entry.action.contains("-R") => CompleteMode::Installed,
+                    _                                          => CompleteMode::Available,
+                };
+            }
+
             let val: String = match (&entry.prompt, arg) {
                 (None,    _       ) => String::new(),
                 (Some(_), Some(a) ) => a.to_string(),
@@ -214,11 +304,22 @@ fn run_entry(
 
             println!("{}", dim(&format!("→ {}...", entry.desc.as_deref().unwrap_or(&action))));
             dispatch(&action);
+
+            if is_update_action(&action) {
+                let av = Arc::clone(&available);
+                let iv = Arc::clone(&installed);
+                thread::spawn(move || {
+                    let fresh_av = refresh_available();
+                    let fresh_iv = refresh_installed();
+                    if let Ok(mut w) = av.write() { *w = fresh_av; }
+                    if let Ok(mut w) = iv.write()  { *w = fresh_iv; }
+                });
+            }
         }
     }
 }
 
-fn handle_exec(args: &[String], cfg: &Config) {
+fn handle_exec(args: &[String], cfg: &Config, available: Arc<RwLock<Vec<String>>>, installed: Arc<RwLock<Vec<String>>>) {
     let Some(name) = args.first() else {
         eprintln!("{}", dim("error: -e requires a command name"));
         exit(1);
@@ -228,7 +329,7 @@ fn handle_exec(args: &[String], cfg: &Config) {
         exit(1);
     });
     let keymap = build_key_map(cfg);
-    run_entry(entry, args.get(1).map(String::as_str), &mut make_editor(), &keymap);
+    run_entry(entry, args.get(1).map(String::as_str), &mut make_editor(available, installed), &keymap, Arc::new(RwLock::new(vec![])), Arc::new(RwLock::new(vec![])));
 }
 
 fn ask_confirm(ctx: &str) -> bool {
@@ -260,7 +361,7 @@ fn dispatch(action: &str) {
     }
 }
 
-// ── Help / version ───────────────────────────────────────────────────────────
+// ── Help / version ────────────────────────────────────────────────────────────
 
 fn print_help(keymap: &HashMap<String, CommandEntry>) {
     let mut entries: Vec<&CommandEntry> = keymap.values().collect();
@@ -299,17 +400,15 @@ fn display_version() {
     println!(" `--'  `\"  ");
 }
 
-// ── Tab completion ───────────────────────────────────────────────────────────
+// ── Tab completion ────────────────────────────────────────────────────────────
 
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq)]
+enum CompleteMode { Available, Installed }
+
 struct PackageCompleter {
-    cache: OnceLock<Vec<String>>,
-}
-
-impl PackageCompleter {
-    fn packages(&self) -> &[String] {
-        self.cache.get_or_init(load_packages)
-    }
+    available: Arc<RwLock<Vec<String>>>,
+    installed: Arc<RwLock<Vec<String>>>,
+    mode:      CompleteMode,
 }
 
 impl Helper    for PackageCompleter {}
@@ -323,7 +422,12 @@ impl Completer for PackageCompleter {
     fn complete(&self, line: &str, _pos: usize, _ctx: &Context<'_>)
         -> Result<(usize, Vec<String>), ReadlineError>
     {
-        let pkgs = self.packages();
+        let lock = if self.mode == CompleteMode::Installed {
+            self.installed.read()
+        } else {
+            self.available.read()
+        };
+        let pkgs = lock.unwrap();
         let start = pkgs.partition_point(|p| p.as_str() < line);
         let matches = pkgs[start..].iter()
             .take_while(|p| p.starts_with(line))
@@ -331,26 +435,4 @@ impl Completer for PackageCompleter {
             .collect();
         Ok((0, matches))
     }
-}
-
-fn load_packages() -> Vec<String> {
-    let mut packages = Vec::with_capacity(8_192);
-
-    if let Ok(out) = Command::new("pacman").arg("-Slq").output() {
-        if let Ok(s) = String::from_utf8(out.stdout) {
-            packages.extend(s.lines().filter(|l| !l.is_empty()).map(str::to_string));
-        }
-    }
-
-    let aur_cache = cache_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("paru/packages.aur");
-
-    if let Ok(content) = fs::read_to_string(aur_cache) {
-        packages.extend(content.lines().filter(|l| !l.is_empty()).map(str::to_string));
-    }
-
-    packages.sort_unstable();
-    packages.dedup();
-    packages
 }
