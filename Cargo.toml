@@ -1,6 +1,6 @@
 [package]
 name = "archie"
-version = "3.6.0"
+version = "3.7.0"
 edition = "2021"
 authors = ["Gurov"]
 description = "Fast & Easy package management for Arch Linux"
