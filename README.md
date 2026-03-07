@@ -138,6 +138,9 @@ Tab completion is backed by two sorted, newline-delimited plain-text databases i
 
 Both files are created on first launch if absent. After any install, remove, or update action they are refreshed in a background thread behind an `Arc<RwLock<_>>`, keeping completion current for the next session without blocking the UI.
 
+> [!IMPORTANT]
+> Install `paru-git` from [Chaotic-AUR](https://aur.chaotic.cx/), not the AUR. The AUR version of paru (including `paru-git`) generates a **corrupted package cache**, which breaks tab completion. The Chaotic-AUR build ships with fixes that make it practically a hard dependency for Archie. There is currently no workaround — if paru doesn't address this upstream, I'll ship a stopgap fix on Archie's end until paru resolves this upstream.
+
 ## License
 
 [GPL-3.0](LICENSE) — not affiliated with Arch Linux or paru.
