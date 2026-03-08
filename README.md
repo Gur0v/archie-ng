@@ -24,7 +24,7 @@ The original C version worked — until it didn't.
 paru -S archie
 ```
 
-**From source** — requires `rustup` and `paru`
+**From source** — requires `rustup` and `paru-git`
 
 ```bash
 git clone https://github.com/Gur0v/archie-ng
@@ -138,12 +138,8 @@ Tab completion is backed by two sorted, newline-delimited plain-text databases i
 
 Both files are created on first launch if absent. After any install, remove, or update action they are refreshed in a background thread behind an `Arc<RwLock<_>>`, keeping completion current for the next session without blocking the UI.
 
-> [!IMPORTANT]
-> **If tab completion stops working**, try switching to `paru-git` from [Chaotic-AUR](https://aur.chaotic.cx/). However, be aware that some builds of `paru` (including `paru-git`) can corrupt the local package list.
->
-> To check if this has happened, run `paru -Pc`. If the output looks like random garbage instead of normal package names, your package list has been corrupted.
->
-> There's no reliable fix for this yet. If it isn't resolved in a future `paru` update, Archie may need to switch to `yay` as its default package manager backend.
+> [!NOTE]
+> Archie requires `paru-git` as its backend. The stable `paru` and `paru-bin` packages are known to corrupt the local package list, which breaks tab completion. You can verify corruption by running `paru -Pc` — if the output looks like garbage instead of normal package names, the package list has been affected.
 
 ## License
 
